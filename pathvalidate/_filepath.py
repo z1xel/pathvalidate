@@ -15,6 +15,7 @@ from typing import Final, Optional
 from ._base import AbstractSanitizer, AbstractValidator, BaseFile, BaseValidator
 from ._common import findall_to_str, is_nt_abspath, to_str, validate_pathtype
 from ._const import _NTFS_RESERVED_FILE_NAMES, DEFAULT_MIN_LEN, INVALID_CHAR_ERR_MSG_TMPL, Platform
+from ._emoji import remove_emoji as _remove_emoji
 from ._filename import FileNameSanitizer, FileNameValidator
 from ._types import PathType, PlatformType
 from .error import ErrorAttrKey, ErrorReason, InvalidCharError, ReservedNameError, ValidationError
@@ -39,6 +40,7 @@ class FilePathSanitizer(AbstractSanitizer):
         normalize: bool = True,
         validate_after_sanitize: bool = False,
         validator: Optional[AbstractValidator] = None,
+        remove_emoji: bool = False,
     ) -> None:
         if validator:
             fpath_validator = validator
@@ -63,6 +65,7 @@ class FilePathSanitizer(AbstractSanitizer):
         )
 
         self._sanitize_regexp = self._get_sanitize_regexp()
+        self._remove_emoji = remove_emoji
         self.__fname_sanitizer = FileNameSanitizer(
             max_len=self.max_len,
             fs_encoding=fs_encoding,
@@ -91,6 +94,19 @@ class FilePathSanitizer(AbstractSanitizer):
             raise
 
         unicode_filepath = to_str(value)
+        if self._remove_emoji:
+            # Replace emptied components instead of collapsing the directory structure.
+            parts = re.split(r"([/\\])", unicode_filepath)
+            for i in range(0, len(parts), 2):
+                if parts[i]:
+                    cleaned = _remove_emoji(parts[i])
+                    if cleaned != parts[i] and (
+                        cleaned in ("", ".", "..")
+                        or (self._is_windows(include_universal=True) and not cleaned.strip(" ."))
+                    ):
+                        cleaned = "_"
+                    parts[i] = cleaned
+            unicode_filepath = "".join(parts)
         drive, unicode_filepath = self.__split_drive(unicode_filepath)
         unicode_filepath = self._sanitize_regexp.sub(replacement_text, unicode_filepath)
         if self.__normalize and unicode_filepath:
@@ -417,6 +433,7 @@ def sanitize_filepath(
     additional_reserved_names: Optional[Sequence[str]] = None,
     normalize: bool = True,
     validate_after_sanitize: bool = False,
+    remove_emoji: bool = False,
 ) -> PathType:
     """Make a valid file path from a string.
 
@@ -482,6 +499,8 @@ def sanitize_filepath(
             If |True|, normalize the the file path.
         validate_after_sanitize:
             Execute validation after sanitization to the file path.
+        remove_emoji:
+            If True, remove Unicode emoji from path components. Defaults to False.
 
     Returns:
         Same type as the argument (str or PathLike object):
@@ -513,4 +532,5 @@ def sanitize_filepath(
         reserved_name_handler=reserved_name_handler,
         additional_reserved_names=additional_reserved_names,
         validate_after_sanitize=validate_after_sanitize,
+        remove_emoji=remove_emoji,
     ).sanitize(file_path, replacement_text)

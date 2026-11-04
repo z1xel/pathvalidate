@@ -14,6 +14,7 @@ from typing import Final, Optional
 from ._base import AbstractSanitizer, AbstractValidator, BaseFile, BaseValidator
 from ._common import findall_to_str, is_nt_abspath, to_str, truncate_str, validate_pathtype
 from ._const import DEFAULT_MIN_LEN, INVALID_CHAR_ERR_MSG_TMPL, Platform
+from ._emoji import remove_emoji as _remove_emoji
 from ._types import PathType, PlatformType
 from .error import ErrorAttrKey, ErrorReason, InvalidCharError, ValidationError
 from .handler import ReservedNameHandler, ValidationErrorHandler
@@ -39,6 +40,7 @@ class FileNameSanitizer(AbstractSanitizer):
         additional_reserved_names: Optional[Sequence[str]] = None,
         validate_after_sanitize: bool = False,
         validator: Optional[AbstractValidator] = None,
+        remove_emoji: bool = False,
     ) -> None:
         if validator:
             fname_validator = validator
@@ -64,6 +66,7 @@ class FileNameSanitizer(AbstractSanitizer):
         )
 
         self._sanitize_regexp = self._get_sanitize_regexp()
+        self._remove_emoji = remove_emoji
 
     def sanitize(self, value: PathType, replacement_text: str = "") -> PathType:
         try:
@@ -76,7 +79,10 @@ class FileNameSanitizer(AbstractSanitizer):
                 return self._null_value_handler(e)  # type: ignore
             raise
 
-        sanitized_filename = self._sanitize_regexp.sub(replacement_text, str(value))
+        sanitized_filename = str(value)
+        if self._remove_emoji:
+            sanitized_filename = _remove_emoji(sanitized_filename)
+        sanitized_filename = self._sanitize_regexp.sub(replacement_text, sanitized_filename)
         sanitized_filename = truncate_str(sanitized_filename, self._fs_encoding, self.max_len)
 
         try:
@@ -389,6 +395,7 @@ def sanitize_filename(
     reserved_name_handler: Optional[ValidationErrorHandler] = None,
     additional_reserved_names: Optional[Sequence[str]] = None,
     validate_after_sanitize: bool = False,
+    remove_emoji: bool = False,
 ) -> PathType:
     """Make a valid filename from a string.
 
@@ -445,6 +452,8 @@ def sanitize_filename(
             Case insensitive.
         validate_after_sanitize:
             Execute validation after sanitization to the file name.
+        remove_emoji:
+            If True, remove Unicode emoji from the filename. Defaults to False.
 
     Returns:
         Same type as the ``filename`` (str or PathLike object):
@@ -475,4 +484,5 @@ def sanitize_filename(
         reserved_name_handler=reserved_name_handler,
         additional_reserved_names=additional_reserved_names,
         validate_after_sanitize=validate_after_sanitize,
+        remove_emoji=remove_emoji,
     ).sanitize(filename, replacement_text)
